@@ -52,13 +52,13 @@ const main = async () => {
     .start();
 
   // Handle incoming connections
-  node.addEventListener("peer:connect", ({ peerId }) => {
-    console.log(`Connected to ${peerId.toB58String()}`);
+  node.addEventListener("peer:connect", (event) => {
+    console.log(`Connected to ${event}`);
   });
 
   // Handle incoming connections
-  node.addEventListener("peer:disconnect", ({ peerId }) => {
-    console.log(`Disconnected from ${peerId.toB58String()}`);
+  node.addEventListener("peer:disconnect", (event) => {
+    console.log(`Disconnected from ${event}`);
   });
 };
 
