@@ -10,6 +10,9 @@ import { peerIdFromString } from "@libp2p/peer-id";
 import { identify } from "@libp2p/identify";
 import { kadDHT, removePublicAddressesMapper } from "@libp2p/kad-dht";
 import { logger } from "@libp2p/logger";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const bootnode = multiaddr(
   "/ip4/10.217.185.19/tcp/10000/p2p/12D3KooWQGcjo96Ag3uLqWHk8z6aMzH1oLY1NFBUJRhEcZN2zmVm"
@@ -21,7 +24,14 @@ for (let i = 0; i < 5; i++) {
   (async () => {
     const node = await createLibp2p({
       addresses: {
-        listen: [multiaddr("/ip4/0.0.0.0/tcp/0").toString()],
+        listen:
+          i === 0
+            ? [
+                multiaddr(
+                  `/ip4/0.0.0.0/tcp/${process.env.PORT || 4001}`
+                ).toString(),
+              ]
+            : [multiaddr(`/ip4/0.0.0.0/tcp/0`).toString()],
       },
       transports: [tcp()],
       connectionEncryption: [noise()],
