@@ -11,6 +11,8 @@ import { identify } from "@libp2p/identify";
 import { kadDHT, removePublicAddressesMapper } from "@libp2p/kad-dht";
 import { logger } from "@libp2p/logger";
 import dotenv from "dotenv";
+import fetch from "isomorphic-fetch";
+import cron from "node-cron";
 
 dotenv.config();
 
@@ -125,3 +127,10 @@ for (let i = 0; i < 5; i++) {
     await new Promise((resolve) => setTimeout(resolve, 10000));
   })();
 }
+
+// Ping every 30 seconds
+cron.schedule("*/30 * * * * *", async () => {
+  fetch(`https://nodedfs.onrender.com`).then((res) => {
+    console.log(`Ping sent to https://nodedfs.onrender.com`);
+  });
+});
