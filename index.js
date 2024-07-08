@@ -1,77 +1,117 @@
+import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
+import { bootstrap } from "@libp2p/bootstrap";
 import { tcp } from "@libp2p/tcp";
 import { noise } from "@chainsafe/libp2p-noise";
 import { mplex } from "@libp2p/mplex";
-import { createEd25519PeerId } from "@libp2p/peer-id-factory";
 import { ping } from "@libp2p/ping";
-import { config } from "dotenv";
-import cron from "node-cron";
-import fetch from "isomorphic-fetch";
+import { yamux } from "@chainsafe/libp2p-yamux";
+import { peerIdFromString } from "@libp2p/peer-id";
+import { identify } from "@libp2p/identify";
+import { kadDHT, removePublicAddressesMapper } from "@libp2p/kad-dht";
+import { logger } from "@libp2p/logger";
 
-config();
+const bootnode = multiaddr(
+  "/ip4/10.217.185.19/tcp/10000/p2p/12D3KooWQGcjo96Ag3uLqWHk8z6aMzH1oLY1NFBUJRhEcZN2zmVm"
+);
 
-const main = async () => {
-  const peerId = await createEd25519PeerId();
+const nodes = [];
 
-  const node = await createLibp2p({
-    peerId,
-    addresses: {
-      listen: [`/ip4/0.0.0.0/tcp/${process.env.PORT || 4001}`],
-    },
-    transports: [tcp()],
-    connectionEncryption: [noise()],
-    streamMuxers: [mplex()],
-    services: {
-      ping: ping({
-        protocolPrefix: "rebackk",
-      }),
-    },
-  });
+for (let i = 0; i < 5; i++) {
+  (async () => {
+    const node = await createLibp2p({
+      addresses: {
+        listen: [multiaddr("/ip4/0.0.0.0/tcp/0").toString()],
+      },
+      transports: [tcp()],
+      connectionEncryption: [noise()],
+      streamMuxers: [mplex(), yamux()],
+      services: {
+        ping: ping({
+          protocolPrefix: "rebackk",
+        }),
+        kadDHT: kadDHT({
+          peerInfoMapper: removePublicAddressesMapper,
+          clientMode: false,
+        }),
+        identify: identify(),
+      },
+      peerDiscovery: [
+        bootstrap({
+          list: [bootnode.toString()],
+        }),
+      ],
+      logger: {
+        forComponent: (comp) => logger(`rebackk:${comp}`),
+      },
+      nodeInfo: {
+        version: "1.0.0",
+        name: "rebackk",
+      },
+    });
 
-  await node.start();
-  console.log(`Bootstrap node started with id ${peerId.toString()}`);
-  console.log("Listening on:");
-  node.getMultiaddrs().forEach((addr) => {
-    console.log(addr.toString());
-  });
+    await node.start();
 
-  // Send A PING message every 1 minute
-  cron
-    .schedule("*/60 * * * * *", async () => {
-      const peers = await node.peerStore.all();
-      console.log(`Pinging ${peers.length} peers`);
-      for (const peer of peers) {
+    if (i === 0) {
+      node.getMultiaddrs().map((addr) => {
+        nodes.push(addr);
+      });
+    } else {
+      await Promise.all(
+        nodes.map(async (addr) => {
+          try {
+            await node.dial(addr);
+          } catch (err) {
+            console.log(err);
+          }
+        })
+      );
+    }
+
+    const bootNodePeerId = multiaddr(bootnode).getPeerId();
+    if (bootNodePeerId === null) {
+      // console.log("Bootnode is invalid");
+    } else {
+      // console.log("Bootnode is valid");
+      node.peerStore.save(peerIdFromString(bootNodePeerId), {
+        multiaddrs: [bootnode],
+      });
+    }
+
+    node.addEventListener("peer:connect", (evt) => {
+      const peerId = evt.detail;
+      console.log(`Node ${i} Connection established to:`, peerId.toString()); // Emitted when a peer has been found
+    });
+
+    node.addEventListener("peer:discovery", (evt) => {
+      const peerInfo = evt.detail;
+      console.log(`Node ${i} Discovered:`, peerInfo.id.toString());
+
+      peerInfo.multiaddrs.map((addr) => {
+        node
+          .dial(addr)
+          .catch((err) => {
+            console.log(err);
+          })
+          .then(() => {
+            console.log(
+              `Node ${i} Connection established to:`,
+              peerInfo.id.toString()
+            );
+          });
+      });
+    });
+
+    await Promise.all(
+      nodes.map(async (addr) => {
         try {
-          await node.services.ping(peer.id);
-          console.log(`Ping sent to ${peer.id.toString()}`);
+          await node.services.ping.ping(addr);
         } catch (err) {
-          console.error(`Ping failed to ${peer.id.toString()}`);
+          console.log(err);
         }
-      }
-    })
-    .start();
-
-  // Handle incoming connections
-  node.addEventListener("peer:connect", (event) => {
-    console.log(`Connected to ${event}`);
-  });
-
-  // Handle incoming connections
-  node.addEventListener("peer:disconnect", (event) => {
-    console.log(`Disconnected from ${event}`);
-  });
-};
-
-// Ping bootnode every 30 seconds
-cron
-  .schedule("*/30 * * * * *", async () => {
-    fetch("https://bootnodedfs.onrender.com").then(() =>
-      console.log("Bootnode pinged")
+      })
     );
-  })
-  .start();
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+  })();
+}
